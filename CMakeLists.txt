@@ -20,7 +20,6 @@ FetchContent_Declare(cpr
 )
 FetchContent_MakeAvailable(cpr)
 
-set(CURSES_NEED_NCURSESW TRUE)
 add_executable(${PROJECT_NAME} 
     src/main.cpp 
     src/vk_api.cpp
@@ -34,10 +33,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     libs
 )
 
-# 2. ДОБАВЬ ncursesw прямо сюда:
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     cpr::cpr 
     nlohmann_json::nlohmann_json
     Threads::Threads
-    ncursesw  # <--- Явное указание UTF-8 версии библиотеки
+    ncursesw
 )

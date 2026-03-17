@@ -17,6 +17,7 @@ struct VkMessage {
 class VkApi {
 public:
     explicit VkApi(const std::string& token);
+    
     nlohmann::json call(const std::string& method, cpr::Parameters params = cpr::Parameters{});
 
     int getGroupId();
@@ -25,9 +26,10 @@ public:
     bool sendImage(int peer_id, const std::string& filepath, const std::string& text = "");
     bool downloadImage(const std::string& url, const std::string& filepath);
 
-    // НОВЫЕ МЕТОДЫ
     std::vector<VkContact> getConversations(int count = 10);
     std::vector<VkMessage> getChatHistory(int peer_id, int count = 20);
+
+    static std::string parseAttachments(const nlohmann::json& msg);
 
 private:
     std::string access_token;

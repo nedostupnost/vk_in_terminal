@@ -1,6 +1,6 @@
 #include "ascii_converter.hpp"
-#include <iostream>
 #include <sstream>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.hpp"
 
@@ -25,7 +25,6 @@ std::string AsciiConverter::convert(const std::string& filepath, int max_width) 
 
     for (int y = 0; y < target_height; ++y) {
         for (int x = 0; x < target_width; ++x) {
-            
             int src_x = (int)(x / scale_factor);
             int src_y = (int)(y / (scale_factor * 0.5f));
 
@@ -43,10 +42,9 @@ std::string AsciiConverter::convert(const std::string& filepath, int max_width) 
             if (char_index >= ramp.length()) char_index = ramp.length() - 1; 
             
             char ascii_char = ramp[char_index];
-
             ss << "\033[38;2;" << r << ";" << g << ";" << b << "m" << ascii_char;
         }
-        ss << "\033[0m\n";
+        ss << "\033[0m\n"; 
     }
 
     stbi_image_free(data);
