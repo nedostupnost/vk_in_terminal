@@ -1,9 +1,12 @@
 #include "ui_console.hpp"
-#include <locale.h>
+#include "logger.hpp"
+#include <clocale>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
 #include <thread>
+#include <cstring>
+#include <iostream>
 
 std::string getCurrentTime() {
     auto now = std::chrono::system_clock::now();
@@ -15,241 +18,260 @@ std::string getCurrentTime() {
 
 UIConsole::UIConsole() {
     setlocale(LC_ALL, ""); 
-    log_file.open("system_log.txt", std::ios::app);
-
-    initscr();  
-    cbreak();
-    noecho();
-    keypad(stdscr, TRUE);
-
-    if (has_colors()) {
-        start_color();
-        use_default_colors();
-        init_pair(1, COLOR_GREEN, -1);
-        init_pair(2, COLOR_CYAN, -1);
-        init_pair(3, COLOR_YELLOW, -1);
-        init_pair(4, COLOR_WHITE, COLOR_BLUE);
+    LOG("UIConsole: Запуск конструктора...");
+    
+    LOG("UIConsole: Вызов notcurses_init(nullptr, stdout)...");
+    nc = notcurses_init(nullptr, stdout);
+    
+    if (!nc) {
+        LOG("UIConsole: КРИТИЧЕСКАЯ ОШИБКА - Не удалось инициализировать Notcurses!");
+        std::cerr << "\n[КРИТИЧЕСКАЯ ОШИБКА] Не удалось инициализировать Notcurses!\n";
+        exit(1);
+    }
+    LOG("UIConsole: notcurses_init успешно отработал!");
+    
+    std_plane = notcurses_stdplane(nc);
+    if (!std_plane) {
+        LOG("UIConsole: ОШИБКА - std_plane == nullptr");
+        exit(1);
     }
 
-    int max_y, max_x;
-    getmaxyx(stdscr, max_y, max_x);
+    ncplane_dim_yx(std_plane, &term_height, &term_width);
+    LOG("UIConsole: Размеры терминала: " + std::to_string(term_width) + "x" + std::to_string(term_height));
 
-    int h = max_y - 4; 
-    int cw = max_x - 30; 
+    if (term_height < 15 || term_width < 45) {
+        LOG("UIConsole: ОШИБКА - Терминал слишком мал.");
+        notcurses_stop(nc);
+        std::cerr << "\n[ОШИБКА] Ваш терминал слишком мал! (" << term_width << "x" << term_height << ")\n"
+                  << "Растяните окно минимум до 45x15 и запустите снова.\n";
+        exit(1);
+    }
 
-    chat_view_h = h - 2;
-    chat_view_w = cw - 4; 
-    scroll_offset = 0;
-    current_pad_y = 0;
+    unsigned int h = term_height - 4;
+    unsigned int cw = term_width - 30;
 
-    chat_bdr = newwin(h, cw, 1, 0);
-    chat_pad = newpad(2000, chat_view_w); 
-    scrollok(chat_pad, TRUE);
+    LOG("UIConsole: Создание базовых плоскостей...");
+    ncplane_options chat_bdr_opts = {0};
+    chat_bdr_opts.y = 1; chat_bdr_opts.x = 0; chat_bdr_opts.rows = h; chat_bdr_opts.cols = cw;
+    chat_bdr = ncplane_create(std_plane, &chat_bdr_opts);
 
-    contacts_bdr = newwin(h, 30, 1, cw);
-    contacts_win = newwin(h - 2, 28, 2, cw + 1);
+    ncplane_options contacts_bdr_opts = {0};
+    contacts_bdr_opts.y = 1; contacts_bdr_opts.x = cw; contacts_bdr_opts.rows = h; contacts_bdr_opts.cols = 30;
+    contacts_bdr = ncplane_create(std_plane, &contacts_bdr_opts);
 
-    status_win = newwin(1, max_x, max_y - 4, 0);
-    input_win = newwin(3, max_x, max_y - 3, 0);
+    ncplane_options input_bdr_opts = {0};
+    input_bdr_opts.y = term_height - 3; input_bdr_opts.x = 0; input_bdr_opts.rows = 3; input_bdr_opts.cols = term_width;
+    input_bdr = ncplane_create(std_plane, &input_bdr_opts);
 
-    keypad(input_win, TRUE); 
+    if (chat_bdr) {
+        ncplane_options chat_opts = {0};
+        chat_opts.y = 1; chat_opts.x = 1; chat_opts.rows = h - 2; chat_opts.cols = cw - 2;
+        chat_plane = ncplane_create(chat_bdr, &chat_opts);
+        if (chat_plane) ncplane_set_scrolling(chat_plane, true); 
+    }
 
+    if (contacts_bdr) {
+        ncplane_options contacts_opts = {0};
+        contacts_opts.y = 1; contacts_opts.x = 1; contacts_opts.rows = h - 2; contacts_opts.cols = 28;
+        contacts_plane = ncplane_create(contacts_bdr, &contacts_opts);
+    }
+
+    if (input_bdr) {
+        ncplane_options input_opts = {0};
+        input_opts.y = 1; input_opts.x = 1; input_opts.rows = 1; input_opts.cols = term_width - 2;
+        input_plane = ncplane_create(input_bdr, &input_opts);
+    }
+
+    ncplane_options status_opts = {0};
+    status_opts.y = term_height - 4; status_opts.x = 0; status_opts.rows = 1; status_opts.cols = term_width;
+    status_plane = ncplane_create(std_plane, &status_opts);
+
+    LOG("UIConsole: Переход к drawBorders()...");
     drawBorders();
+    LOG("UIConsole: Инициализация полностью и успешно завершена.");
 }
 
 UIConsole::~UIConsole() {
-    if (log_file.is_open()) {
-        log_file.close();
-    }
-    delwin(chat_pad); delwin(chat_bdr);
-    delwin(contacts_win); delwin(contacts_bdr);
-    delwin(status_win); delwin(input_win);
-    endwin();
-}
-
-std::string UIConsole::sanitizeText(const std::string& text) {
-    std::string res;
-    for (size_t i = 0; i < text.length(); ) {
-        unsigned char c = text[i];
-        if ((c & 0x80) == 0) { res += text[i++]; }
-        else if ((c & 0xE0) == 0xC0) {
-            if (i + 1 < text.length()) { res += text[i++]; res += text[i++]; } else break;
-        }
-        else if ((c & 0xF0) == 0xE0) {
-            if (i + 2 < text.length()) { res += text[i++]; res += text[i++]; res += text[i++]; } else break;
-        }
-        else if ((c & 0xF8) == 0xF0) {
-            res += "[эмодзи]"; 
-            i += 4;
-        } else { i++; }
-    }
-    return res;
-}
-
-void UIConsole::refreshChat() {
-    prefresh(chat_pad, scroll_offset, 0, 2, 2, 2 + chat_view_h - 1, 2 + chat_view_w - 1);
+    LOG("UIConsole: Вызов деструктора...");
+    if (nc) notcurses_stop(nc); 
 }
 
 void UIConsole::drawContactsText() {
-    werase(contacts_win);
+    if (!contacts_plane) return;
+    ncplane_erase(contacts_plane);
+    int y = 0;
     for (size_t i = 0; i < cached_contacts.size(); ++i) {
-        if (cached_contacts[i].second) { 
-            wattron(contacts_win, COLOR_PAIR(1) | A_BOLD); 
-            wprintw(contacts_win, "[%zu] * %s\n", i + 1, cached_contacts[i].first.c_str());
-            wattroff(contacts_win, COLOR_PAIR(1) | A_BOLD);
+        if (cached_contacts[i].second) {
+            ncplane_set_fg_rgb8(contacts_plane, 0, 255, 0); 
+            ncplane_printf_yx(contacts_plane, y++, 0, "[%zu] * %s", i + 1, cached_contacts[i].first.c_str());
         } else {
-            wprintw(contacts_win, "[%zu]   %s\n", i + 1, cached_contacts[i].first.c_str());
+            ncplane_set_fg_rgb8(contacts_plane, 200, 200, 200); 
+            ncplane_printf_yx(contacts_plane, y++, 0, "[%zu]   %s", i + 1, cached_contacts[i].first.c_str());
         }
     }
-    wrefresh(contacts_win);
 }
 
 void UIConsole::drawBorders() {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-    int max_x = getmaxx(stdscr);
+    if (!nc || !std_plane) return; 
 
-    attron(COLOR_PAIR(4) | A_BOLD);
-    mvhline(0, 0, ' ', max_x);
-    mvprintw(0, 2, " 🌻 VK Console ");
-    attroff(COLOR_PAIR(4) | A_BOLD);
+    LOG("drawBorders: Отрисовка шапки...");
+    ncplane_set_bg_rgb8(std_plane, 0, 0, 150);
+    ncplane_set_fg_rgb8(std_plane, 255, 255, 255);
+    ncplane_printf_yx(std_plane, 0, 2, " 🌻 VK Console Messenger (Notcurses Engine) ");
 
-    box(chat_bdr, 0, 0);
-    mvwprintw(chat_bdr, 0, 2, " Чат ");
+    LOG("drawBorders: Отрисовка рамки чата...");
+    if (chat_bdr) {
+        ncplane_set_fg_rgb8(chat_bdr, 255, 255, 255);
+        ncplane_perimeter_rounded(chat_bdr, 0, 0, 0); // Идеально безопасная функция
+        ncplane_printf_yx(chat_bdr, 0, 2, " Чат ");
+    }
     
-    box(contacts_bdr, 0, 0);
-    mvwprintw(contacts_bdr, 0, 2, " Контакты ");
+    LOG("drawBorders: Отрисовка рамки контактов...");
+    if (contacts_bdr) {
+        ncplane_set_fg_rgb8(contacts_bdr, 255, 255, 255);
+        ncplane_perimeter_rounded(contacts_bdr, 0, 0, 0);
+        ncplane_printf_yx(contacts_bdr, 0, 2, " Контакты ");
+    }
     
-    box(input_win, 0, 0);
-    wattron(input_win, COLOR_PAIR(4));
-    mvwprintw(input_win, 0, 2, " Send Message ");
-    wattroff(input_win, COLOR_PAIR(4));
+    LOG("drawBorders: Отрисовка рамки ввода...");
+    if (input_bdr) {
+        ncplane_set_fg_rgb8(input_bdr, 255, 255, 255);
+        ncplane_perimeter_rounded(input_bdr, 0, 0, 0);
+        ncplane_printf_yx(input_bdr, 0, 2, " Send Message ");
+    }
 
-    refresh();
-    wrefresh(chat_bdr); 
-    wrefresh(contacts_bdr); 
-    wrefresh(input_win);
-
-    drawContactsText(); 
-    refreshChat();
+    LOG("drawBorders: drawContactsText()...");
+    drawContactsText();
+    
+    LOG("drawBorders: вызов notcurses_render()...");
+    notcurses_render(nc);
+    LOG("drawBorders: Рендер прошел успешно!");
 }
 
 void UIConsole::updateContacts(const std::vector<std::pair<std::string, bool>>& contacts) {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     cached_contacts = contacts; 
     drawContactsText();
+    if (nc) notcurses_render(nc);
 }
 
 void UIConsole::clearChat() {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-    werase(chat_pad);
-    wmove(chat_pad, 0, 0);
-    current_pad_y = 0;
-    scroll_offset = 0;
-    drawBorders();
-}
-
-void UIConsole::scrollChat(int direction) {
-    std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-    scroll_offset += direction;
-    
-    if (scroll_offset < 0) scroll_offset = 0;
-    
-    int max_scroll = current_pad_y - chat_view_h;
-    if (max_scroll < 0) max_scroll = 0;
-    if (scroll_offset > max_scroll) scroll_offset = max_scroll;
-    
-    refreshChat();
-    wrefresh(input_win);
+    if (chat_plane) ncplane_erase(chat_plane);
+    if (nc) notcurses_render(nc);
 }
 
 void UIConsole::printMessage(const std::string& sender, const std::string& text) {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-    std::string safe_text = sanitizeText(text); 
+    if (!chat_plane || !nc) return;
 
-    int color_pair = (sender == "Вы") ? 1 : 2;
+    if (sender == "Вы") ncplane_set_fg_rgb8(chat_plane, 0, 255, 0);
+    else ncplane_set_fg_rgb8(chat_plane, 0, 255, 255);
 
-    wprintw(chat_pad, "[%s] ", getCurrentTime().c_str());
-    wattron(chat_pad, COLOR_PAIR(color_pair) | A_BOLD);
-    wprintw(chat_pad, "%s", sender.c_str());
-    wattroff(chat_pad, COLOR_PAIR(color_pair) | A_BOLD);
-    wprintw(chat_pad, ": %s\n", safe_text.c_str());
+    ncplane_printf(chat_plane, "[%s] %s: ", getCurrentTime().c_str(), sender.c_str());
     
-    int cur_x;
-    getyx(chat_pad, current_pad_y, cur_x);
+    ncplane_set_fg_rgb8(chat_plane, 200, 200, 200);
+    ncplane_printf(chat_plane, "%s\n", text.c_str());
+    
+    notcurses_render(nc);
+}
 
-    int max_scroll = current_pad_y - chat_view_h;
-    if (max_scroll < 0) max_scroll = 0;
-    if (scroll_offset >= max_scroll - 2) scroll_offset = max_scroll;
+void UIConsole::printMedia(const std::string& sender, const std::string& filepath) {
+    std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+    if (!chat_plane || !nc) return;
+    
+    ncplane_set_fg_rgb8(chat_plane, 0, 255, 255);
+    ncplane_printf(chat_plane, "[%s] %s прислал медиа:\n", getCurrentTime().c_str(), sender.c_str());
+    
+    struct ncvisual* ncv = ncvisual_from_file(filepath.c_str());
+    if (ncv) {
+        struct ncvisual_options vopts = {0};
+        vopts.n = chat_plane;
+        vopts.scaling = NCSCALE_SCALE;
+        vopts.blitter = NCBLIT_PIXEL; 
+        vopts.flags = NCVISUAL_OPTION_NODEGRADE;
+        
+        if (ncvisual_blit(nc, ncv, &vopts) == nullptr) {
+            vopts.blitter = NCBLIT_2x1; 
+            vopts.flags = 0;
+            ncvisual_blit(nc, ncv, &vopts);
+        }
+        ncvisual_destroy(ncv);
+        ncplane_printf(chat_plane, "\n"); 
+    } else {
+        ncplane_set_fg_rgb8(chat_plane, 255, 0, 0);
+        ncplane_printf(chat_plane, "[ОШИБКА: Не удалось прочитать файл %s]\n", filepath.c_str());
+    }
+    
+    notcurses_render(nc);
+}
 
-    refreshChat();
-    wrefresh(input_win);
+void UIConsole::clearSystem() {
+    std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+    if (!status_plane || !nc) return;
+    ncplane_erase(status_plane);
+    notcurses_render(nc);
+}
+
+void UIConsole::showTyping(const std::string& sender) {
+    std::lock_guard<std::recursive_mutex> lock(ui_mutex);
+    if (!status_plane || !nc) return;
+    ncplane_erase(status_plane);
+    ncplane_set_fg_rgb8(status_plane, 0, 255, 0); 
+    ncplane_printf_yx(status_plane, 0, 2, "✎ %s набирает сообщение...", sender.c_str());
+    notcurses_render(nc);
 }
 
 void UIConsole::printSystem(const std::string& text) {
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-    status_msg_id++;
-    int current_id = status_msg_id;
+    if (!status_plane || !nc) return;
+    
+    LOG("СИСТЕМА: " + text);
 
-    if (log_file.is_open()) {
-        log_file << "[" << getCurrentTime() << "] " << text << std::endl;
-    }
-
-    werase(status_win);
-    wattron(status_win, COLOR_PAIR(3) | A_BLINK | A_BOLD);
-    mvwprintw(status_win, 0, 2, ">>> %s <<<", text.c_str());
-    wattroff(status_win, COLOR_PAIR(3) | A_BLINK | A_BOLD);
-    wrefresh(status_win);
-    wrefresh(input_win);
-
-    std::thread([this, current_id]() {
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        if (status_msg_id == current_id) {
-            werase(status_win);
-            wrefresh(status_win);
-            wrefresh(input_win);
-        }
-    }).detach();
+    ncplane_erase(status_plane);
+    ncplane_set_fg_rgb8(status_plane, 255, 255, 0); 
+    ncplane_printf_yx(status_plane, 0, 2, ">>> %s <<<", text.c_str());
+    notcurses_render(nc);
 }
 
 std::string UIConsole::getUserInput() {
     std::string input;
-    int ch;
-    wtimeout(input_win, 50);
+    ncinput ni;
 
     while (true) {
         {
             std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-            werase(input_win);
-            box(input_win, 0, 0);
-            wattron(input_win, COLOR_PAIR(4));
-            mvwprintw(input_win, 0, 2, " Send Message ");
-            wattroff(input_win, COLOR_PAIR(4));
-            mvwprintw(input_win, 1, 2, "%s", input.c_str());
-            wrefresh(input_win);
+            if (!input_plane || !nc) break;
+            ncplane_erase(input_plane);
+            ncplane_set_fg_rgb8(input_plane, 255, 255, 255);
+            ncplane_printf_yx(input_plane, 0, 0, "%s", input.c_str());
+            notcurses_render(nc);
         }
 
-        ch = wgetch(input_win);
-        if (ch == ERR) continue;
+        uint32_t id = notcurses_get(nc, nullptr, &ni);
+        if (id == (uint32_t)-1) continue;
 
-        if (ch == KEY_UP) { scrollChat(-1); }
-        else if (ch == KEY_DOWN) { scrollChat(1); }
-        else if (ch == KEY_PPAGE) { scrollChat(-chat_view_h / 2); } 
-        else if (ch == KEY_NPAGE) { scrollChat(chat_view_h / 2); }  
-        else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) break;
-        else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+        if (id == NCKEY_ENTER || id == '\n' || id == '\r') {
+            break;
+        } else if (id == NCKEY_BACKSPACE || id == 127 || id == '\b') {
             if (!input.empty()) {
                 while (!input.empty() && (input.back() & 0xC0) == 0x80) input.pop_back();
                 if (!input.empty()) input.pop_back();
             }
         } 
-        else if (ch >= 32 && ch <= 255) input.push_back(ch);
+        else if (id >= 32 && id < NCKEY_INVALID) {
+            if (ni.utf8[0] != '\0') input += ni.utf8;
+            else if (id < 128) input.push_back((char)id);
+        }
     }
 
     {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        werase(input_win);
-        drawBorders();
+        if (input_plane && nc) {
+            ncplane_erase(input_plane);
+            notcurses_render(nc);
+        }
     }
     return input;
 }

@@ -22,9 +22,9 @@ FetchContent_MakeAvailable(cpr)
 
 add_executable(${PROJECT_NAME} 
     src/main.cpp 
+    src/app.cpp
     src/vk_api.cpp
     src/longpoll.cpp
-    src/ascii_converter.cpp
     src/ui_console.cpp 
 )
 
@@ -37,5 +37,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     cpr::cpr 
     nlohmann_json::nlohmann_json
     Threads::Threads
-    ncursesw
+    notcurses
+    notcurses-core
 )

@@ -1,5 +1,5 @@
 #pragma once
-#include <ncurses.h>
+#include <notcurses/notcurses.h>
 #include <string>
 #include <mutex>
 #include <vector>
@@ -10,36 +10,36 @@ class UIConsole {
 public:
     UIConsole();
     ~UIConsole();
-
     void printMessage(const std::string& sender, const std::string& text);
     void printSystem(const std::string& text);
-    
+    void showTyping(const std::string& sender);
+    void clearSystem();
+    void printMedia(const std::string& sender, const std::string& filepath);
     void updateContacts(const std::vector<std::pair<std::string, bool>>& contacts);
     void clearChat();
-    
     std::string getUserInput();
 
 private:
-    WINDOW* chat_bdr;
-    WINDOW* chat_pad;
-    WINDOW* contacts_bdr;
-    WINDOW* contacts_win;
-    WINDOW* status_win;
-    WINDOW* input_win;
+    struct notcurses* nc = nullptr;
+    struct ncplane* std_plane = nullptr;       
+    struct ncplane* chat_bdr = nullptr;        
+    struct ncplane* chat_plane = nullptr;      
+    struct ncplane* contacts_bdr = nullptr;    
+    struct ncplane* contacts_plane = nullptr;  
+    struct ncplane* input_bdr = nullptr;       
+    struct ncplane* input_plane = nullptr;     
+    struct ncplane* status_plane = nullptr;    
 
     std::recursive_mutex ui_mutex;
     std::atomic<int> status_msg_id{0};
     std::ofstream log_file;
-
+    
+    // Возвращаем кэш контактов на место!
     std::vector<std::pair<std::string, bool>> cached_contacts;
-    int chat_view_h;
-    int chat_view_w;
-    int scroll_offset;
-    int current_pad_y;
+    
+    unsigned int term_height = 0;
+    unsigned int term_width = 0;
 
     void drawBorders();
-    void drawContactsText();
-    void refreshChat();
-    void scrollChat(int direction);
-    std::string sanitizeText(const std::string& text);
+    void drawContactsText(); // Возвращаем метод отрисовки!
 };
