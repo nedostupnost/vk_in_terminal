@@ -4,7 +4,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.hpp"
 
-std::string AsciiConverter::convert(const std::string& filepath, int max_width) {
+std::string AsciiConverter::convert(const std::string& filepath, int max_width)
+{
     int width, height, channels;
     unsigned char* data = stbi_load(filepath.c_str(), &width, &height, &channels, 3);
     
@@ -17,14 +18,17 @@ std::string AsciiConverter::convert(const std::string& filepath, int max_width) 
     int target_width = max_width;
     int target_height = (int)(height * scale_factor * 0.5f);
 
-    if (width < max_width) {
+    if (width < max_width)
+    {
         target_width = width;
         target_height = (int)(height * 0.5f);
         scale_factor = 1.0f;
     }
 
-    for (int y = 0; y < target_height; ++y) {
-        for (int x = 0; x < target_width; ++x) {
+    for (int y = 0; y < target_height; ++y)
+    {
+        for (int x = 0; x < target_width; ++x)
+        {
             int src_x = (int)(x / scale_factor);
             int src_y = (int)(y / (scale_factor * 0.5f));
 

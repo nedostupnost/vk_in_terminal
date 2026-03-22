@@ -9,14 +9,18 @@ int main() {
     
     std::ifstream f("token.txt");
     std::string t;
-    if (f.is_open()) {
+    if (f.is_open())
+    {
         std::getline(f, t);
         LOG("Файл token.txt успешно прочитан.");
-    } else {
+    }
+    else
+    {
         LOG("ОШИБКА: Не удалось открыть token.txt");
     }
     
-    if (t.empty()) {
+    if (t.empty())
+    {
         std::cerr << "Файл token.txt не найден или пуст!\n";
         LOG("КРИТ: Токен пуст, завершение работы.");
         return 1;

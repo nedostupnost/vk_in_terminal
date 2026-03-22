@@ -5,14 +5,18 @@
 
 using json = nlohmann::json;
 
-VkApi::VkApi(const std::string& token) : access_token(token) {
+VkApi::VkApi(const std::string& token) : access_token(token)
+{
     LOG("VkApi: объект создан");
 }
 
-std::string VkApi::parseAttachments(const nlohmann::json& msg) {
+std::string VkApi::parseAttachments(const nlohmann::json& msg)
+{
     std::string res = "";
-    if (msg.contains("attachments") && msg["attachments"].is_array()) {
-        for (const auto& att : msg["attachments"]) {
+    if (msg.contains("attachments") && msg["attachments"].is_array())
+    {
+        for (const auto& att : msg["attachments"])
+        {
             std::string type = att["type"];
             if (type == "photo") res += " [Фото]";
             else if (type == "video") res += " [Видео]";
@@ -28,7 +32,8 @@ std::string VkApi::parseAttachments(const nlohmann::json& msg) {
     return res;
 }
 
-json VkApi::call(const std::string& method, cpr::Parameters params) {
+json VkApi::call(const std::string& method, cpr::Parameters params)
+{
     LOG("VkApi::call -> Вызов метода: " + method);
     std::string url = "https://api.vk.com/method/" + method;
     params.Add({"access_token", access_token});
@@ -37,10 +42,12 @@ json VkApi::call(const std::string& method, cpr::Parameters params) {
     cpr::Response r = cpr::Post(cpr::Url{url}, params);
     
     LOG("VkApi::call -> Ответ HTTP код: " + std::to_string(r.status_code));
-    LOG("VkApi::call -> СЫРОЙ ОТВЕТ ВК: " + r.text); // <--- Ловим ошибки ВК
+    LOG("VkApi::call -> СЫРОЙ ОТВЕТ ВК: " + r.text);
     
-    if (r.status_code == 200) {
-        try {
+    if (r.status_code == 200)
+    {
+        try
+        {
             return json::parse(r.text);
         } catch (...) {
             LOG("VkApi::call -> ОШИБКА: ВК вернул невалидный JSON!");
@@ -50,25 +57,28 @@ json VkApi::call(const std::string& method, cpr::Parameters params) {
     return json({});
 }
 
-int VkApi::getGroupId() {
+int VkApi::getGroupId()
+{
     LOG("VkApi::getGroupId -> Старт");
     json response = call("groups.getById");
     
-    if (response.contains("error")) {
+    if (response.contains("error"))
+    {
         LOG("VkApi::getGroupId -> ВК ВЕРНУЛ ОШИБКУ: " + response["error"].dump());
         return 0;
     }
 
-    // Обработка современного формата API 5.199+
-    if (response.contains("response") && response["response"].is_object() && response["response"].contains("groups")) {
-        if (response["response"]["groups"].is_array() && !response["response"]["groups"].empty()) {
+    if (response.contains("response") && response["response"].is_object() && response["response"].contains("groups"))
+    {
+        if (response["response"]["groups"].is_array() && !response["response"]["groups"].empty())
+        {
             int id = response["response"]["groups"][0].value("id", 0);
             LOG("VkApi::getGroupId -> Успех, ID: " + std::to_string(id));
             return id;
         }
     }
-    // Обработка старого формата (на случай, если ВК отдаст старый ответ)
-    else if (response.contains("response") && response["response"].is_array() && !response["response"].empty()) {
+    else if (response.contains("response") && response["response"].is_array() && !response["response"].empty())
+    {
         int id = response["response"][0].value("id", 0);
         LOG("VkApi::getGroupId -> Успех, ID: " + std::to_string(id));
         return id;
@@ -78,16 +88,19 @@ int VkApi::getGroupId() {
     return 0;
 }
 
-std::string VkApi::getUserName(int user_id) {
+std::string VkApi::getUserName(int user_id)
+{
     if (user_id < 0) return "Группа " + std::to_string(-user_id);
     json response = call("users.get", cpr::Parameters{{"user_ids", std::to_string(user_id)}});
-    if (response.contains("response") && response["response"].is_array() && !response["response"].empty()) {
+    if (response.contains("response") && response["response"].is_array() && !response["response"].empty())
+    {
         return response["response"][0].value("first_name", "") + " " + response["response"][0].value("last_name", "");
     }
     return "ID " + std::to_string(user_id);
 }
 
-bool VkApi::sendMessage(int peer_id, const std::string& text) {
+bool VkApi::sendMessage(int peer_id, const std::string& text)
+{
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<int> dist(1, 2147483647);
@@ -99,7 +112,8 @@ bool VkApi::sendMessage(int peer_id, const std::string& text) {
     return !response.contains("error");
 }
 
-bool VkApi::sendImage(int peer_id, const std::string& filepath, const std::string& text) {
+bool VkApi::sendImage(int peer_id, const std::string& filepath, const std::string& text)
+{
     json server_response = call("photos.getMessagesUploadServer", cpr::Parameters{{"peer_id", std::to_string(peer_id)}});
     if (!server_response.contains("response")) return false;
     std::string upload_url = server_response["response"]["upload_url"];
@@ -127,20 +141,25 @@ bool VkApi::sendImage(int peer_id, const std::string& filepath, const std::strin
     return !send_response.contains("error");
 }
 
-bool VkApi::downloadImage(const std::string& url, const std::string& filepath) {
+bool VkApi::downloadImage(const std::string& url, const std::string& filepath)
+{
     cpr::Response r = cpr::Get(cpr::Url{url});
-    if (r.status_code == 200) {
+    if (r.status_code == 200)
+    {
         std::ofstream fs(filepath, std::ios::binary);
         if (fs.is_open()) { fs << r.text; fs.close(); return true; }
     }
     return false;
 }
 
-std::vector<VkContact> VkApi::getConversations(int count) {
+std::vector<VkContact> VkApi::getConversations(int count)
+{
     std::vector<VkContact> contacts;
     json response = call("messages.getConversations", cpr::Parameters{{"count", std::to_string(count)}});
-    if (response.contains("response") && response["response"].contains("items")) {
-        for (const auto& item : response["response"]["items"]) {
+    if (response.contains("response") && response["response"].contains("items"))
+    {
+        for (const auto& item : response["response"]["items"])
+        {
             int peer_id = item["conversation"]["peer"]["id"];
             contacts.push_back({peer_id, getUserName(peer_id)});
         }
@@ -148,7 +167,8 @@ std::vector<VkContact> VkApi::getConversations(int count) {
     return contacts;
 }
 
-std::vector<VkMessage> VkApi::getChatHistory(int peer_id, int count) {
+std::vector<VkMessage> VkApi::getChatHistory(int peer_id, int count)
+{
     std::vector<VkMessage> history;
     json response = call("messages.getHistory", cpr::Parameters{{"peer_id", std::to_string(peer_id)}, {"count", std::to_string(count)}});
     if (response.contains("response") && response["response"].contains("items")) {

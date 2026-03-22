@@ -8,7 +8,8 @@
 #include <cstring>
 #include <iostream>
 
-std::string getCurrentTime() {
+std::string getCurrentTime()
+{
     auto now = std::chrono::system_clock::now();
     auto in_time_t = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
@@ -16,14 +17,16 @@ std::string getCurrentTime() {
     return ss.str();
 }
 
-UIConsole::UIConsole() {
+UIConsole::UIConsole()
+{
     setlocale(LC_ALL, ""); 
     LOG("UIConsole: Запуск конструктора...");
     
     LOG("UIConsole: Вызов notcurses_init(nullptr, stdout)...");
     nc = notcurses_init(nullptr, stdout);
     
-    if (!nc) {
+    if (!nc)
+    {
         LOG("UIConsole: КРИТИЧЕСКАЯ ОШИБКА - Не удалось инициализировать Notcurses!");
         std::cerr << "\n[КРИТИЧЕСКАЯ ОШИБКА] Не удалось инициализировать Notcurses!\n";
         exit(1);
@@ -31,7 +34,8 @@ UIConsole::UIConsole() {
     LOG("UIConsole: notcurses_init успешно отработал!");
     
     std_plane = notcurses_stdplane(nc);
-    if (!std_plane) {
+    if (!std_plane)
+    {
         LOG("UIConsole: ОШИБКА - std_plane == nullptr");
         exit(1);
     }
@@ -39,7 +43,8 @@ UIConsole::UIConsole() {
     ncplane_dim_yx(std_plane, &term_height, &term_width);
     LOG("UIConsole: Размеры терминала: " + std::to_string(term_width) + "x" + std::to_string(term_height));
 
-    if (term_height < 15 || term_width < 45) {
+    if (term_height < 15 || term_width < 45)
+    {
         LOG("UIConsole: ОШИБКА - Терминал слишком мал.");
         notcurses_stop(nc);
         std::cerr << "\n[ОШИБКА] Ваш терминал слишком мал! (" << term_width << "x" << term_height << ")\n"
@@ -63,20 +68,23 @@ UIConsole::UIConsole() {
     input_bdr_opts.y = term_height - 3; input_bdr_opts.x = 0; input_bdr_opts.rows = 3; input_bdr_opts.cols = term_width;
     input_bdr = ncplane_create(std_plane, &input_bdr_opts);
 
-    if (chat_bdr) {
+    if (chat_bdr)
+    {
         ncplane_options chat_opts = {0};
         chat_opts.y = 1; chat_opts.x = 1; chat_opts.rows = h - 2; chat_opts.cols = cw - 2;
         chat_plane = ncplane_create(chat_bdr, &chat_opts);
         if (chat_plane) ncplane_set_scrolling(chat_plane, true); 
     }
 
-    if (contacts_bdr) {
+    if (contacts_bdr)
+    {
         ncplane_options contacts_opts = {0};
         contacts_opts.y = 1; contacts_opts.x = 1; contacts_opts.rows = h - 2; contacts_opts.cols = 28;
         contacts_plane = ncplane_create(contacts_bdr, &contacts_opts);
     }
 
-    if (input_bdr) {
+    if (input_bdr)
+    {
         ncplane_options input_opts = {0};
         input_opts.y = 1; input_opts.x = 1; input_opts.rows = 1; input_opts.cols = term_width - 2;
         input_plane = ncplane_create(input_bdr, &input_opts);
@@ -91,51 +99,61 @@ UIConsole::UIConsole() {
     LOG("UIConsole: Инициализация полностью и успешно завершена.");
 }
 
-UIConsole::~UIConsole() {
+UIConsole::~UIConsole()
+{
     LOG("UIConsole: Вызов деструктора...");
     if (nc) notcurses_stop(nc); 
 }
 
-void UIConsole::drawContactsText() {
+void UIConsole::drawContactsText()
+{
     if (!contacts_plane) return;
     ncplane_erase(contacts_plane);
     int y = 0;
-    for (size_t i = 0; i < cached_contacts.size(); ++i) {
-        if (cached_contacts[i].second) {
+    for (size_t i = 0; i < cached_contacts.size(); ++i)
+    {
+        if (cached_contacts[i].second)
+        {
             ncplane_set_fg_rgb8(contacts_plane, 0, 255, 0); 
             ncplane_printf_yx(contacts_plane, y++, 0, "[%zu] * %s", i + 1, cached_contacts[i].first.c_str());
-        } else {
+        }
+        else
+        {
             ncplane_set_fg_rgb8(contacts_plane, 200, 200, 200); 
             ncplane_printf_yx(contacts_plane, y++, 0, "[%zu]   %s", i + 1, cached_contacts[i].first.c_str());
         }
     }
 }
 
-void UIConsole::drawBorders() {
+void UIConsole::drawBorders()
+{
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     if (!nc || !std_plane) return; 
 
     LOG("drawBorders: Отрисовка шапки...");
     ncplane_set_bg_rgb8(std_plane, 0, 0, 150);
     ncplane_set_fg_rgb8(std_plane, 255, 255, 255);
-    ncplane_printf_yx(std_plane, 0, 2, " 🌻 VK Console Messenger (Notcurses Engine) ");
+    ncplane_printf_yx(std_plane, 0, 2, " 🌻 VK Console Messenger ");
 
     LOG("drawBorders: Отрисовка рамки чата...");
-    if (chat_bdr) {
+    if (chat_bdr)
+    {
         ncplane_set_fg_rgb8(chat_bdr, 255, 255, 255);
-        ncplane_perimeter_rounded(chat_bdr, 0, 0, 0); // Идеально безопасная функция
+        ncplane_perimeter_rounded(chat_bdr, 0, 0, 0);
         ncplane_printf_yx(chat_bdr, 0, 2, " Чат ");
     }
     
     LOG("drawBorders: Отрисовка рамки контактов...");
-    if (contacts_bdr) {
+    if (contacts_bdr)
+    {
         ncplane_set_fg_rgb8(contacts_bdr, 255, 255, 255);
         ncplane_perimeter_rounded(contacts_bdr, 0, 0, 0);
         ncplane_printf_yx(contacts_bdr, 0, 2, " Контакты ");
     }
     
     LOG("drawBorders: Отрисовка рамки ввода...");
-    if (input_bdr) {
+    if (input_bdr)
+    {
         ncplane_set_fg_rgb8(input_bdr, 255, 255, 255);
         ncplane_perimeter_rounded(input_bdr, 0, 0, 0);
         ncplane_printf_yx(input_bdr, 0, 2, " Send Message ");
@@ -149,20 +167,27 @@ void UIConsole::drawBorders() {
     LOG("drawBorders: Рендер прошел успешно!");
 }
 
-void UIConsole::updateContacts(const std::vector<std::pair<std::string, bool>>& contacts) {
+void UIConsole::updateContacts(const std::vector<std::pair<std::string, bool>>& contacts)
+{
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     cached_contacts = contacts; 
     drawContactsText();
     if (nc) notcurses_render(nc);
 }
 
-void UIConsole::clearChat() {
+void UIConsole::clearChat()
+{
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-    if (chat_plane) ncplane_erase(chat_plane);
+    if (chat_plane)
+    {
+        ncplane_erase(chat_plane);
+        ncplane_cursor_move_yx(chat_plane, 0, 0); 
+    }
     if (nc) notcurses_render(nc);
 }
 
-void UIConsole::printMessage(const std::string& sender, const std::string& text) {
+void UIConsole::printMessage(const std::string& sender, const std::string& text)
+{
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     if (!chat_plane || !nc) return;
 
@@ -177,7 +202,8 @@ void UIConsole::printMessage(const std::string& sender, const std::string& text)
     notcurses_render(nc);
 }
 
-void UIConsole::printMedia(const std::string& sender, const std::string& filepath) {
+void UIConsole::printMedia(const std::string& sender, const std::string& filepath)
+{
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     if (!chat_plane || !nc) return;
     
@@ -185,7 +211,8 @@ void UIConsole::printMedia(const std::string& sender, const std::string& filepat
     ncplane_printf(chat_plane, "[%s] %s прислал медиа:\n", getCurrentTime().c_str(), sender.c_str());
     
     struct ncvisual* ncv = ncvisual_from_file(filepath.c_str());
-    if (ncv) {
+    if (ncv)
+    {
         struct ncvisual_options vopts = {0};
         vopts.n = chat_plane;
         vopts.scaling = NCSCALE_SCALE;
@@ -199,7 +226,9 @@ void UIConsole::printMedia(const std::string& sender, const std::string& filepat
         }
         ncvisual_destroy(ncv);
         ncplane_printf(chat_plane, "\n"); 
-    } else {
+    }
+    else
+    {
         ncplane_set_fg_rgb8(chat_plane, 255, 0, 0);
         ncplane_printf(chat_plane, "[ОШИБКА: Не удалось прочитать файл %s]\n", filepath.c_str());
     }
@@ -207,14 +236,16 @@ void UIConsole::printMedia(const std::string& sender, const std::string& filepat
     notcurses_render(nc);
 }
 
-void UIConsole::clearSystem() {
+void UIConsole::clearSystem()
+{
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     if (!status_plane || !nc) return;
     ncplane_erase(status_plane);
     notcurses_render(nc);
 }
 
-void UIConsole::showTyping(const std::string& sender) {
+void UIConsole::showTyping(const std::string& sender)
+{
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     if (!status_plane || !nc) return;
     ncplane_erase(status_plane);
@@ -223,7 +254,8 @@ void UIConsole::showTyping(const std::string& sender) {
     notcurses_render(nc);
 }
 
-void UIConsole::printSystem(const std::string& text) {
+void UIConsole::printSystem(const std::string& text)
+{
     std::lock_guard<std::recursive_mutex> lock(ui_mutex);
     if (!status_plane || !nc) return;
     
@@ -235,11 +267,17 @@ void UIConsole::printSystem(const std::string& text) {
     notcurses_render(nc);
 }
 
-std::string UIConsole::getUserInput() {
+std::string UIConsole::getUserInput()
+{
     std::string input;
     ncinput ni;
+    
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 50000000;
 
-    while (true) {
+    while (true)
+    {
         {
             std::lock_guard<std::recursive_mutex> lock(ui_mutex);
             if (!input_plane || !nc) break;
@@ -249,18 +287,27 @@ std::string UIConsole::getUserInput() {
             notcurses_render(nc);
         }
 
-        uint32_t id = notcurses_get(nc, nullptr, &ni);
-        if (id == (uint32_t)-1) continue;
+        uint32_t id = notcurses_get(nc, &ts, &ni);
+        
+        if (id == (uint32_t)-1 || id == 0)
+        {
+            continue;
+        }
 
-        if (id == NCKEY_ENTER || id == '\n' || id == '\r') {
+        if (id == NCKEY_ENTER || id == '\n' || id == '\r')
+        {
             break;
-        } else if (id == NCKEY_BACKSPACE || id == 127 || id == '\b') {
-            if (!input.empty()) {
+        }
+        else if (id == NCKEY_BACKSPACE || id == 127 || id == '\b')
+        {
+            if (!input.empty())
+            {
                 while (!input.empty() && (input.back() & 0xC0) == 0x80) input.pop_back();
                 if (!input.empty()) input.pop_back();
             }
         } 
-        else if (id >= 32 && id < NCKEY_INVALID) {
+        else if (id >= 32 && id < NCKEY_INVALID)
+        {
             if (ni.utf8[0] != '\0') input += ni.utf8;
             else if (id < 128) input.push_back((char)id);
         }
@@ -268,7 +315,8 @@ std::string UIConsole::getUserInput() {
 
     {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
-        if (input_plane && nc) {
+        if (input_plane && nc)
+        {
             ncplane_erase(input_plane);
             notcurses_render(nc);
         }

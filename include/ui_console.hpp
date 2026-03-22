@@ -34,12 +34,11 @@ private:
     std::atomic<int> status_msg_id{0};
     std::ofstream log_file;
     
-    // Возвращаем кэш контактов на место!
     std::vector<std::pair<std::string, bool>> cached_contacts;
     
     unsigned int term_height = 0;
     unsigned int term_width = 0;
 
     void drawBorders();
-    void drawContactsText(); // Возвращаем метод отрисовки!
+    void drawContactsText();
 };

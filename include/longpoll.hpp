@@ -6,7 +6,8 @@
 class LongPoll {
 public:
     LongPoll(VkApi& api, int group_id);
-    void listen(
+    void listen
+    (
         std::function<void(int peer_id, const std::string& text, const std::string& att_type, const std::string& att_url)> on_message,
         std::function<void(int peer_id)> on_typing
     );
