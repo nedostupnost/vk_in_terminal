@@ -1,26 +1,29 @@
 #pragma once
 #include <notcurses/notcurses.h>
 #include <string>
-#include <mutex>
+#include <string_view>
 #include <vector>
-#include <atomic>
-#include <fstream>
+#include <memory>
+
+struct NcDeleter { 
+    void operator()(notcurses* n) const { if (n) notcurses_stop(n); } 
+};
 
 class UIConsole {
 public:
     UIConsole();
-    ~UIConsole();
-    void printMessage(const std::string& sender, const std::string& text);
-    void printSystem(const std::string& text);
-    void showTyping(const std::string& sender);
+    ~UIConsole() = default;    
+    void printMessage(std::string_view sender, std::string_view text);
+    void printSystem(std::string_view text);
+    void showTyping(std::string_view sender);
     void clearSystem();
-    void printMedia(const std::string& sender, const std::string& filepath);
+    void printMedia(std::string_view sender, std::string_view filepath);
     void updateContacts(const std::vector<std::pair<std::string, bool>>& contacts);
     void clearChat();
     std::string getUserInput();
 
 private:
-    struct notcurses* nc = nullptr;
+    std::unique_ptr<notcurses, NcDeleter> nc;
     struct ncplane* std_plane = nullptr;       
     struct ncplane* chat_bdr = nullptr;        
     struct ncplane* chat_plane = nullptr;      
@@ -30,10 +33,6 @@ private:
     struct ncplane* input_plane = nullptr;     
     struct ncplane* status_plane = nullptr;    
 
-    std::recursive_mutex ui_mutex;
-    std::atomic<int> status_msg_id{0};
-    std::ofstream log_file;
-    
     std::vector<std::pair<std::string, bool>> cached_contacts;
     
     unsigned int term_height = 0;

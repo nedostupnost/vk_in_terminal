@@ -1,32 +1,36 @@
 #include "app.hpp"
 #include "logger.hpp"
 #include <thread>
+#include <filesystem>
 
-App::App(const std::string& token) 
-    : api(token), 
-      group_id((LOG("Вызов api.getGroupId()..."), api.getGroupId())), 
-      lp((LOG("Инициализация LongPoll..."), api), group_id) 
-{
-    LOG("Конструктор App: инициализация завершена.");
-}
+App::App(std::string token) 
+    : api(std::move(token)), 
+      group_id(api.getGroupId()), 
+      lp(api, group_id.value_or(0)) {}
 
 std::string App::getUserNameSafe(int peer_id)
 {
-    std::lock_guard<std::mutex> lock(names_mutex);
-    if (user_names.find(peer_id) == user_names.end())
     {
-        user_names[peer_id] = api.getUserName(peer_id);
+        std::shared_lock read_lock(names_mutex);
+        if (auto it = user_names.find(peer_id); it != user_names.end())
+        {
+            return it->second;
+        }
     }
-    return user_names[peer_id];
+    std::string name = api.getUserName(peer_id);
+    {
+        std::scoped_lock write_lock(names_mutex);
+        user_names[peer_id] = name;
+    }
+    return name;
 }
 
 void App::refreshContactsUI()
 {
     std::vector<std::pair<std::string, bool>> display_contacts;
-    for (const auto& conv : conversations)
-    {
+    for (const auto& conv : conversations) {
         bool has_unread = (unread_chats.find(conv.peer_id) != unread_chats.end());
-        display_contacts.push_back({conv.name, has_unread});
+        display_contacts.emplace_back(conv.name, has_unread);
     }
     ui.updateContacts(display_contacts);
 }
@@ -44,9 +48,8 @@ void App::loadChatHistory(int peer_id)
     }
 }
 
-void App::processCommand(const std::string& input)
+void App::processCommand(std::string_view input)
 {
-    LOG("Введена команда: " + input);
     if (input == "/exit") exit(0);
     
     if (input == "/open")
@@ -58,12 +61,16 @@ void App::processCommand(const std::string& input)
         }
         ui.printSystem("Скачивание медиафайла...");
         std::string ext = (last_media_type == "photo") ? ".jpg" : ".mp3";
-        std::string filepath = "temp_media" + ext;
+
+        std::filesystem::path filepath = std::filesystem::temp_directory_path() / ("temp_media" + ext);
         
-        if (api.downloadImage(last_media_url, filepath)) {
+        if (api.downloadImage(last_media_url, filepath.string()))
+        {
             std::string sender = (active_chat == 0) ? "Контакт" : getUserNameSafe(active_chat);
-            ui.printMedia(sender, filepath);
-        } else {
+            ui.printMedia(sender, filepath.string());
+        }
+        else
+        {
             ui.printSystem("ОШИБКА: Не удалось скачать файл.");
         }
         return;
@@ -73,9 +80,8 @@ void App::processCommand(const std::string& input)
     {
         try
         {
-            int idx = std::stoi(input.substr(3)) - 1;
-            if (idx >= 0 && idx < (int)conversations.size())
-            {
+            int idx = std::stoi(std::string(input.substr(3))) - 1;
+            if (idx >= 0 && idx < static_cast<int>(conversations.size())) {
                 active_chat = conversations[idx].peer_id;
                 unread_chats.erase(active_chat);
                 refreshContactsUI();
@@ -91,94 +97,95 @@ void App::processCommand(const std::string& input)
         return;
     }
 
-    if (input.length() > 5 && input.substr(0, 5) == "/img ")
-    {
-        std::string filepath = input.substr(5);
-        ui.printSystem("Отправка картинки...");
-        if (api.sendImage(active_chat, filepath))
-        {
-            ui.printSystem("УСПЕХ: Картинка отправлена!");
-        } 
-        else
-        {
-            ui.printSystem("ОШИБКА: Не удалось отправить картинку.");
-        }
-    } 
-    else
-    {
-        ui.printMessage("Вы", input);
-        api.sendMessage(active_chat, input);
-    }
+    ui.printMessage("Вы", std::string(input));
+    api.sendMessage(active_chat, input);
 }
 
 void App::run()
 {
-    LOG("App::run() -> Начало работы");
-    if (group_id == 0)
+    if (!group_id.has_value() || group_id.value() == 0)
     {
-        LOG("ОШИБКА: group_id равен 0");
         ui.printSystem("ОШИБКА: Неверный токен или нет доступа к группе.");
         return;
     }
 
-    LOG("Загрузка контактов...");
     ui.printSystem("Загрузка контактов...");
     conversations = api.getConversations(15);
     
     {
-        std::lock_guard<std::mutex> lock(names_mutex);
-        for (const auto& conv : conversations)
-        {
-            user_names[conv.peer_id] = conv.name;
-        }
+        std::scoped_lock lock(names_mutex);
+        for (const auto& conv : conversations) user_names[conv.peer_id] = conv.name;
     }
     refreshContactsUI();
-    LOG("Контакты успешно загружены.");
 
-    LOG("Запуск фонового потока LongPoll...");
     std::thread listener_thread([this]()
     {
-        LOG("Поток LongPoll успешно стартовал.");
         lp.listen(
             [this](int peer_id, const std::string& text, const std::string& att_type, const std::string& att_url)
             {
-                std::string sender_name = getUserNameSafe(peer_id);
-                if (!att_url.empty())
-                {
-                    last_media_type = att_type;
-                    last_media_url = att_url;
-                }
-                if (peer_id == active_chat)
-                {
-                    if (!text.empty())
-                    {
-                        ui.clearSystem();
-                        ui.printMessage(sender_name, text);
-                    }
-                }
-                else
-                {
-                    unread_chats.insert(peer_id);
-                    refreshContactsUI();
-                    ui.printSystem("Новое сообщение от: " + sender_name);
-                }
+                std::scoped_lock lock(queue_mutex);
+                event_queue.push(MessageEvent{peer_id, text, att_type, att_url});
             },
-            [this](int peer_id) {
-                std::string sender_name = getUserNameSafe(peer_id);
-                if (peer_id == active_chat) {
-                    ui.showTyping(sender_name);
-                }
+            [this](int peer_id)
+            {
+                std::scoped_lock lock(queue_mutex);
+                event_queue.push(TypingEvent{peer_id});
             }
         );
     });
-    
     listener_thread.detach();
-    LOG("Поток отсоединен. Переход в главный цикл.");
 
     while (true)
     {
         std::string user_input = ui.getUserInput();
-        if (user_input.empty()) continue;
-        processCommand(user_input);
+        if (!user_input.empty()) processCommand(user_input);
+
+        std::queue<AppEvent> local_queue;
+        {
+            std::scoped_lock lock(queue_mutex);
+            std::swap(local_queue, event_queue);
+        }
+
+        while (!local_queue.empty())
+        {
+            auto event = std::move(local_queue.front());
+            local_queue.pop();
+
+            std::visit([this](auto&& arg)
+            {
+                using T = std::decay_t<decltype(arg)>;
+                
+                if constexpr (std::is_same_v<T, MessageEvent>)
+                {
+                    std::string sender_name = getUserNameSafe(arg.peer_id);
+                    if (!arg.att_url.empty())
+                    {
+                        last_media_type = arg.att_type;
+                        last_media_url = arg.att_url;
+                    }
+                    if (arg.peer_id == active_chat)
+                    {
+                        if (!arg.text.empty())
+                        {
+                            ui.clearSystem();
+                            ui.printMessage(sender_name, arg.text);
+                        }
+                    }
+                    else
+                    {
+                        unread_chats.insert(arg.peer_id);
+                        refreshContactsUI();
+                        ui.printSystem("Новое сообщение от: " + sender_name);
+                    }
+                } 
+                else if constexpr (std::is_same_v<T, TypingEvent>)
+                {
+                    if (arg.peer_id == active_chat)
+                    {
+                        ui.showTyping(getUserNameSafe(arg.peer_id));
+                    }
+                }
+            }, event);
+        }
     }
 }

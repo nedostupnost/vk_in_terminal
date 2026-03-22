@@ -1,37 +1,30 @@
-#include <fstream>
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 #include "app.hpp"
-#include "logger.hpp"
 
 int main() {
-    LOG("=== ЗАПУСК ПРОГРАММЫ ===");
-    LOG("Попытка открыть token.txt...");
+    std::filesystem::path token_path = "token.txt";
     
-    std::ifstream f("token.txt");
-    std::string t;
-    if (f.is_open())
+    if (!std::filesystem::exists(token_path))
     {
-        std::getline(f, t);
-        LOG("Файл token.txt успешно прочитан.");
-    }
-    else
-    {
-        LOG("ОШИБКА: Не удалось открыть token.txt");
-    }
-    
-    if (t.empty())
-    {
-        std::cerr << "Файл token.txt не найден или пуст!\n";
-        LOG("КРИТ: Токен пуст, завершение работы.");
+        std::cerr << "ОШИБКА: Файл token.txt не найден в директории: " 
+                  << std::filesystem::current_path() << "\n";
         return 1;
     }
     
-    LOG("Токен найден, создание объекта App...");
-    App app(t);
+    std::ifstream f(token_path);
+    std::string token;
+    std::getline(f, token);
     
-    LOG("Объект App успешно создан, вызываем app.run()...");
+    if (token.empty())
+    {
+        std::cerr << "ОШИБКА: Файл token.txt пуст!\n";
+        return 1;
+    }
+    
+    App app(std::move(token));
     app.run();
     
-    LOG("=== ШТАТНОЕ ЗАВЕРШЕНИЕ ПРОГРАММЫ ===");
     return 0;
 }
